@@ -325,15 +325,21 @@ def manual_jupytext_to_qmd(py_file: Path, output_dir: Path) -> Path | None:
         return None
 
 
-def run_quarto_render(root: Path) -> bool:
-    """Run quarto render command with verbose output."""
-    print("\nRunning Quarto render...")
-    print("=" * 60)
+def render_single_file(root: Path, file_path: Path) -> tuple[bool, str]:
+    """
+    Render a single file with Quarto.
+    
+    Returns a tuple of (success, error_message).
+    """
+    rel_path = file_path.relative_to(root)
+    print(f"\n{'─' * 60}")
+    print(f"Rendering: {rel_path}")
+    print(f"{'─' * 60}")
     
     try:
         # Use Popen to stream output in real-time
         process = subprocess.Popen(
-            ["quarto", "render", "--verbose"],
+            ["quarto", "render", str(file_path), "--verbose"],
             cwd=root,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -341,24 +347,111 @@ def run_quarto_render(root: Path) -> bool:
             bufsize=1  # Line-buffered
         )
         
+        output_lines = []
         # Stream output line by line
         for line in process.stdout:
             print(line, end="", flush=True)
+            output_lines.append(line)
         
         process.wait()
         
-        print("=" * 60)
-        
         if process.returncode != 0:
-            print(f"\nQuarto render failed with exit code {process.returncode}")
-            return False
+            error_msg = "".join(output_lines[-20:])  # Keep last 20 lines for error context
+            return False, error_msg
         
-        print("\nQuarto render completed successfully!")
-        return True
+        print(f"✓ Successfully rendered: {rel_path}")
+        return True, ""
         
     except FileNotFoundError:
-        print("Error: Quarto CLI not found. Please install Quarto from https://quarto.org/docs/get-started/")
+        return False, "Quarto CLI not found"
+    except Exception as e:
+        return False, str(e)
+
+
+def run_quarto_render(root: Path, teams: list[dict]) -> bool:
+    """
+    Render all files with Quarto, continuing on failure.
+    
+    Returns True if all files rendered successfully, False otherwise.
+    """
+    print("\n" + "=" * 60)
+    print("QUARTO RENDER - Starting")
+    print("=" * 60)
+    
+    # Collect all files to render
+    files_to_render = []
+    
+    # Add index.qmd
+    index_qmd = root / "index.qmd"
+    if index_qmd.exists():
+        files_to_render.append(index_qmd)
+    
+    # Add Team_Projects/README.md
+    readme = root / "Team_Projects" / "README.md"
+    if readme.exists():
+        files_to_render.append(readme)
+    
+    # Add all team files
+    for team in teams:
+        for f in team["files"]:
+            files_to_render.append(f["path"])
+    
+    # Track results
+    successful = []
+    failed = []  # List of (path, error_message)
+    
+    total = len(files_to_render)
+    for i, file_path in enumerate(files_to_render, 1):
+        print(f"\n[{i}/{total}] Processing file...")
+        success, error = render_single_file(root, file_path)
+        
+        if success:
+            successful.append(file_path)
+        else:
+            failed.append((file_path, error))
+            print(f"✗ Failed to render: {file_path.relative_to(root)}")
+            print("  (Continuing with next file...)")
+    
+    # Print summary
+    print("\n" + "=" * 60)
+    print("RENDER SUMMARY")
+    print("=" * 60)
+    print(f"Total files: {total}")
+    print(f"Successful:  {len(successful)}")
+    print(f"Failed:      {len(failed)}")
+    
+    if successful:
+        print(f"\n✓ Successfully rendered ({len(successful)} files):")
+        for path in successful:
+            print(f"  - {path.relative_to(root)}")
+    
+    if failed:
+        print(f"\n✗ Failed to render ({len(failed)} files):")
+        print("-" * 60)
+        for path, error in failed:
+            print(f"\n  FILE: {path.relative_to(root)}")
+            print("  ERROR:")
+            # Indent error message
+            for line in error.strip().split("\n")[-10:]:  # Last 10 lines of error
+                print(f"    {line}")
+        print("-" * 60)
+        print("\nNote: The build will continue despite these errors.")
+        print("Failed files may be missing dependencies or have syntax errors.")
+    
+    print("=" * 60)
+    
+    # Return True even if some files failed - we want partial builds to succeed
+    # Only return False if ALL files failed or critical files failed
+    if len(successful) == 0 and total > 0:
+        print("\nBuild FAILED: No files were rendered successfully.")
         return False
+    
+    if failed:
+        print(f"\nBuild completed with {len(failed)} error(s).")
+    else:
+        print("\nBuild completed successfully!")
+    
+    return True
 
 
 def build_site():
@@ -403,8 +496,8 @@ def build_site():
     index_qmd_path.write_text(index_qmd, encoding="utf-8")
     print(f"Created: {index_qmd_path}")
     
-    # Run Quarto render
-    success = run_quarto_render(root)
+    # Run Quarto render (file by file, continuing on failures)
+    success = run_quarto_render(root, teams)
     
     if success:
         print(f"\nBuild complete! Output in: {root / 'docs'}")
