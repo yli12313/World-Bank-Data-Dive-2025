@@ -13,9 +13,17 @@ Requirements:
     - pip install pyyaml (optional, for YAML generation)
 """
 
+import os
+import shutil
 import subprocess
 import sys
+import webbrowser
 from pathlib import Path
+
+
+def is_github_actions() -> bool:
+    """Check if running in GitHub Actions environment."""
+    return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
 def get_root_dir() -> Path:
@@ -82,6 +90,22 @@ def discover_team_projects(team_src_dir: Path) -> list[dict]:
                     "name": py_file.stem
                 })
         
+        # PDF files
+        for pdf_file in sorted(team_dir.glob("*.pdf")):
+            files.append({
+                "path": pdf_file,
+                "type": "pdf",
+                "name": pdf_file.stem
+            })
+        
+        # PowerPoint files (.pptx)
+        for pptx_file in sorted(team_dir.glob("*.pptx")):
+            files.append({
+                "path": pptx_file,
+                "type": "pptx",
+                "name": pptx_file.stem
+            })
+        
         if files:
             teams.append({
                 "name": team_dir.name,
@@ -110,6 +134,10 @@ def generate_quarto_yml(root: Path, teams: list[dict]) -> str:
     for team in teams:
         team_files = []
         for f in team["files"]:
+            # Skip PDF and PPTX files from Quarto sidebar (they're not renderable)
+            # They will be linked in the index and copied to output
+            if f["type"] in ("pdf", "pptx"):
+                continue
             rel_path = f["path"].relative_to(root)
             team_files.append(f"          - {rel_path}")
         
@@ -197,7 +225,13 @@ def create_index_qmd(root: Path, teams: list[dict]) -> str:
             team_links += f"### {team['name']}\n\n"
             for f in team["files"]:
                 rel_path = f["path"].relative_to(root)
-                team_links += f"- [{f['name']}]({rel_path})\n"
+                # Add file type indicator for PDFs and PPTXs
+                if f["type"] == "pdf":
+                    team_links += f"- [{f['name']}]({rel_path}) (PDF)\n"
+                elif f["type"] == "pptx":
+                    team_links += f"- [{f['name']}]({rel_path}) (PowerPoint)\n"
+                else:
+                    team_links += f"- [{f['name']}]({rel_path})\n"
             team_links += "\n"
     
     qmd_content = f"""---
@@ -391,10 +425,11 @@ def run_quarto_render(root: Path, teams: list[dict]) -> bool:
     if readme.exists():
         files_to_render.append(readme)
     
-    # Add all team files
+    # Add all team files (excluding PDF and PPTX which are just copied)
     for team in teams:
         for f in team["files"]:
-            files_to_render.append(f["path"])
+            if f["type"] not in ("pdf", "pptx"):
+                files_to_render.append(f["path"])
     
     # Track results
     successful = []
@@ -454,6 +489,37 @@ def run_quarto_render(root: Path, teams: list[dict]) -> bool:
     return True
 
 
+def copy_static_files(root: Path, teams: list[dict]) -> None:
+    """
+    Copy static files (PDFs, PPTXs) to the output directory.
+    
+    These files cannot be rendered by Quarto but should be accessible from the site.
+    """
+    docs_dir = root / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    
+    copied_files = []
+    
+    for team in teams:
+        for f in team["files"]:
+            if f["type"] in ("pdf", "pptx"):
+                # Calculate the destination path maintaining directory structure
+                rel_path = f["path"].relative_to(root)
+                dest_path = docs_dir / rel_path
+                
+                # Create parent directories if needed
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Copy the file
+                shutil.copy2(f["path"], dest_path)
+                copied_files.append(rel_path)
+    
+    if copied_files:
+        print(f"\nCopied {len(copied_files)} static file(s) to docs/:")
+        for path in copied_files:
+            print(f"  - {path}")
+
+
 def build_site():
     """Main build function to generate the site using Quarto."""
     root = get_root_dir()
@@ -499,8 +565,19 @@ def build_site():
     # Run Quarto render (file by file, continuing on failures)
     success = run_quarto_render(root, teams)
     
+    # Copy static files (PDFs, PPTXs) to the docs directory
+    print("\nCopying static files (PDFs, PPTXs)...")
+    copy_static_files(root, teams)
+    
     if success:
         print(f"\nBuild complete! Output in: {root / 'docs'}")
+        
+        # Open the site in browser if running locally (not in GitHub Actions)
+        if not is_github_actions():
+            index_html = root / "docs" / "index.html"
+            if index_html.exists():
+                print("\nOpening site in browser...")
+                webbrowser.open(index_html.as_uri())
     else:
         print("\nBuild failed!")
         sys.exit(1)
