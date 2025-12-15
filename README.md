@@ -1,6 +1,9 @@
 # World Bank Data Dive
 <img width="3380" height="1624" alt="image" src="https://github.com/user-attachments/assets/c965f275-c104-402e-92f8-00039fecdde4" />
 
+* Presentation is [here](https://www.canva.com/design/DAG6ftQIfSA/pW-b5By0racKOTOgHcUY6A/view?utm_content=DAG6ftQIfSA&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=hcd000002d0#1).
+* Team: Maryam Shahbaz Ali, Paul Suhwan Lee, Rafael Kovashikawa, Stevens Cadet, Yingquan Li
+
 
 ## Overview
 
