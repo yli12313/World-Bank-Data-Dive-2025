@@ -1,5 +1,6 @@
 # World Bank Data Dive - 2025
-World Bank 2025 DataDive Github repository
+<img width="3380" height="1624" alt="image" src="https://github.com/user-attachments/assets/c965f275-c104-402e-92f8-00039fecdde4" />
+
 
 ## Overview
 
